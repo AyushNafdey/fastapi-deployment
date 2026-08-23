@@ -186,111 +186,102 @@ def fetch_and_store_job() -> None:
     Scheduled job to fetch option-chain from NSE and store it.
     """
     try:
+        now = datetime.now(IST)
+
+        # Weekend
+        if now.weekday() >= 5:
+            logger.info("Market closed - weekend. Skipping collection.")
+            return
+
+        # Market hours: 09:17 to 15:32
+        market_open = now.replace(
+            hour=9, minute=17, second=0, microsecond=0
+        )
+
+        market_close = now.replace(
+            hour=15, minute=32, second=0, microsecond=0
+        )
+
+        if now < market_open or now >= market_close:
+            logger.info(
+                "Market closed (%s). Skipping collection.",
+                now.strftime("%H:%M:%S")
+            )
+            return
+
         payload = fetch_option_chain_from_source()
+
+        if not payload:
+            logger.warning("Empty NSE response. Nothing stored.")
+            return
+
+        if not isinstance(payload.get("records"), dict):
+            logger.warning(
+                "Invalid NSE response. Missing 'records'. "
+                "Snapshot NOT stored."
+            )
+            return
+
         store_snapshot(payload)
+
     except Exception as e:
-        logger.exception("Error in scheduled fetch_and_store_job: %s", e)
+        logger.exception(
+            "Error in scheduled fetch_and_store_job: %s",
+            e
+        )
 
 # API endpoints
-# @app.get("/history", response_model=List[Snapshot])
-# def get_history() -> List[Dict[str, Any]]:
-#     """
-#     Return today's records (in Asia/Kolkata time) in ascending timestamp order.
-#     """
-#     try:
-#         now_ist = datetime.now(IST)
-#         start_of_day_ist = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
-#         start_utc = start_of_day_ist.astimezone(timezone.utc)
-#         next_day_ist = start_of_day_ist + timedelta(days=1)
-#         next_day_utc = next_day_ist.astimezone(timezone.utc)
-
-#         cursor = collection.find(
-#             {"timestamp": {"$gte": start_utc, "$lt": next_day_utc}}
-#         ).sort("timestamp", ASCENDING)
-
-#         results = []
-#         for doc in cursor:
-#             # Convert timestamp to ISO string
-#             ts = doc.get("timestamp")
-#             if isinstance(ts, datetime):
-#                 ts_iso = ts.astimezone(timezone.utc).isoformat()
-#             else:
-#                 # fallback parsing
-#                 ts_iso = parser.parse(str(ts)).astimezone(timezone.utc).isoformat()
-#             data = doc.get("data", {})
-#             results.append({
-#                 "timestamp": ts_iso,
-#                 "data": {
-#                     "total_ce_oi": data.get("Total CE OI") or 0,
-#                     "total_pe_oi": data.get("Total PE OI") or 0,
-#                     "ce_oi_change": data.get("CE OI Change") or 0,
-#                     "pe_oi_change": data.get("PE OI Change") or 0,
-#                     "selected_expiry": data.get("selectedExpiry"),
-#                     "raw": data.get("raw"),
-#                 }
-#             })
-#         return results
-#     except Exception as e:
-#         logger.exception("Error in /history: %s", e)
-#         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/history", response_model=List[Snapshot])
 def get_history() -> List[Dict[str, Any]]:
     """
-    Return today's history.
-    If today's collection has no records yet, return the most recent
-    previous day's collection.
+    Return ONLY the previous calendar day's data.
+
+    Example:
+    Today = 24-08-2026
+    History = 23-08-2026
+
+    If the previous day has no collection/data, return an empty list.
+    Do not search further backwards.
     """
     try:
-        # Get today's collection name
         today = datetime.now(IST).date()
 
-        # First try today's collection
-        today_collection_name = f"oc_data_{today.strftime('%d-%m-%Y')}"
-        today_collection = db[today_collection_name]
+        # EXACTLY previous calendar day
+        previous_day = today - timedelta(days=1)
 
-        cursor = today_collection.find({}).sort("timestamp", ASCENDING)
-        docs = list(cursor)
+        previous_collection_name = (
+            f"oc_data_{previous_day.strftime('%d-%m-%Y')}"
+        )
 
-        # If today's collection is empty, find the most recent
-        # previous option-chain collection.
+        logger.info(
+            "Looking for history in collection: %s",
+            previous_collection_name
+        )
+
+        # Check whether previous day's collection exists
+        if previous_collection_name not in db.list_collection_names():
+            logger.info(
+                "No collection found for previous day: %s",
+                previous_collection_name
+            )
+            return []
+
+        previous_collection = db[previous_collection_name]
+
+        # Get ALL records from previous day
+        docs = list(
+            previous_collection
+            .find({})
+            .sort("timestamp", ASCENDING)
+        )
+
         if not docs:
-
-            collection_names = db.list_collection_names()
-
-            history_collections = []
-
-            for name in collection_names:
-                if name.startswith("oc_data_"):
-                    try:
-                        collection_date = datetime.strptime(
-                            name.replace("oc_data_", ""),
-                            "%d-%m-%Y"
-                        ).date()
-
-                        if collection_date < today:
-                            history_collections.append(
-                                (collection_date, name)
-                            )
-
-                    except ValueError:
-                        continue
-
-            if history_collections:
-                # Most recent previous day
-                _, previous_collection_name = max(
-                    history_collections,
-                    key=lambda x: x[0]
-                )
-
-                previous_collection = db[previous_collection_name]
-
-                docs = list(
-                    previous_collection.find({}).sort(
-                        "timestamp",
-                        ASCENDING
-                    )
-                )
+            logger.info(
+                "Previous day's collection is empty: %s",
+                previous_collection_name
+            )
+            return []
 
         results = []
 
@@ -299,11 +290,15 @@ def get_history() -> List[Dict[str, Any]]:
             ts = doc.get("timestamp")
 
             if isinstance(ts, datetime):
-                ts_iso = ts.astimezone(timezone.utc).isoformat()
+                ts_iso = ts.astimezone(
+                    timezone.utc
+                ).isoformat()
             else:
                 ts_iso = parser.parse(
                     str(ts)
-                ).astimezone(timezone.utc).isoformat()
+                ).astimezone(
+                    timezone.utc
+                ).isoformat()
 
             data = doc.get("data", {})
 
@@ -318,6 +313,12 @@ def get_history() -> List[Dict[str, Any]]:
                     "raw": data.get("raw"),
                 }
             })
+
+        logger.info(
+            "Returning %d history records from %s",
+            len(results),
+            previous_collection_name
+        )
 
         return results
 
