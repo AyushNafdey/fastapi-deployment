@@ -9,7 +9,7 @@ from config import *
 import requests
 from dateutil import parser
 import pytz
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pymongo import MongoClient, ASCENDING, DESCENDING
@@ -358,6 +358,20 @@ def get_latest() -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.exception("Error in /latest-data: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/collect")
+def collect_data(x_cron_secret: str | None = Header(default=None)):
+    expected_secret = os.getenv("CRON_SECRET")
+
+    if not expected_secret or x_cron_secret != expected_secret:
+        raise HTTPException(
+            status_code=403,
+            detail="Unauthorized"
+        )
+
+    fetch_and_store_job()
+
+    return {"status": "collection attempted"}
 
 # Scheduler lifecycle
 scheduler = BackgroundScheduler()
