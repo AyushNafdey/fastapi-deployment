@@ -6,7 +6,7 @@ import os
 
 load_dotenv()
 
-mongodb_uri = os.getenv("MONGODB_URI")
+mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 
 uri = mongodb_uri
 
