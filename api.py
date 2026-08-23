@@ -1,4 +1,5 @@
 import os
+import certifi
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -20,9 +21,6 @@ except ImportError:  # pragma: no cover - fallback for direct script execution
     from scheduler_config import get_schedule_minutes
 
 # Configuration
-# MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-# MONGODB_DB = os.getenv("MONGODB_DB", "nifty")
-# MONGODB_COLLECTION = os.getenv("MONGODB_COLLECTION", "option_chain")
 NSE_SOURCE_URL = os.getenv("NSE_SOURCE_URL", "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY")
 FETCH_USER_AGENT = os.getenv(
     "FETCH_USER_AGENT",
@@ -48,11 +46,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# MongoDB setup
-# client = MongoClient(MONGODB_URI)
-# db = client[MONGODB_DB]
-# collection = db[MONGODB_COLLECTION]
 
 # Ensure index on timestamp for ordering and queries
 collection.create_index([("timestamp", ASCENDING)])

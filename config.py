@@ -3,6 +3,7 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from dotenv import load_dotenv
 import os
+import certifi
 
 load_dotenv()
 
@@ -11,7 +12,11 @@ mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 uri = mongodb_uri
 
 # Create a new client and connect to the server
-client = MongoClient(uri, server_api=ServerApi('1'))
+# client = MongoClient(uri, server_api=ServerApi('1'))
+client = MongoClient(
+    "MONGODB_URI", 
+    tlsCAFile=certifi.where()
+)
 
 # Database creation
 db = client["option_chain_data"]
