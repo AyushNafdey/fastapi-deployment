@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from config import *
 
 import requests
+import asyncio
 from dateutil import parser
 import pytz
 from fastapi import FastAPI, HTTPException, Header
@@ -14,6 +15,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from apscheduler.schedulers.background import BackgroundScheduler
+
+from google import genai
+from google.genai import types
 
 try:
     from .scheduler_config import get_schedule_minutes
@@ -30,6 +34,10 @@ FETCH_USER_AGENT = os.getenv(
 
 FETCH_TIMEOUT = 10  # seconds
 SCHEDULE_MINUTES = get_schedule_minutes()
+
+GEMINI_API_KEY = os.getenv('NIFTY_OC_ANALYSIS')
+
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # Logging
 logging.basicConfig(level=logging.INFO)
@@ -62,6 +70,9 @@ class SnapshotData(BaseModel):
 class Snapshot(BaseModel):
     timestamp: datetime
     data: SnapshotData
+
+class PromptRequest(BaseModel):
+    prompt: str
 
 # Utility functions
 IST = pytz.timezone("Asia/Kolkata")
@@ -372,6 +383,32 @@ def collect_data(x_cron_secret: str | None = Header(default=None)):
     fetch_and_store_job()
 
     return {"status": "collection attempted"}
+
+@app.post("/ai-analysis")
+async def generate_ai_analysis(request: PromptRequest):
+    prompt = request.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+    if len(prompt) > 4000:
+        raise HTTPException(status_code=413, detail="Prompt is too long")
+
+    try:
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model="gemini-3.6-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    disable=True
+                )
+            )
+        )
+        return {"response": response.text}
+    except Exception as e:
+        if "429" in str(e):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again in a minute.")
+        logger.exception("Gemini analysis request failed")
+        raise HTTPException(status_code=502, detail="AI analysis service is unavailable")
 
 # Scheduler lifecycle
 scheduler = BackgroundScheduler()
