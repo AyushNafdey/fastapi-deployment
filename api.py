@@ -216,8 +216,8 @@ def store_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
             "Total PE OI": computed.get("Total PE OI", 0),
             "CE OI Change": computed.get("CE OI Change", 0),
             "PE OI Change": computed.get("PE OI Change", 0),
-            "selectedExpiry": computed.get("selectedExpiry"),
-            "raw": payload,
+            "selectedExpiry": computed.get("selectedExpiry")
+            # "raw": payload,
         },
     }
     res = collection.insert_one(doc)
@@ -249,7 +249,7 @@ def fetch_and_store_job() -> None:
 
         TEST_MODE = True
 
-        if not TEST_MODE and (now < market_open or now >= market_close):
+        if (now < market_open or now >= market_close):
             logger.info(
                 "Market closed (%s). Skipping collection.",
                 now.strftime("%H:%M:%S")
@@ -356,8 +356,8 @@ def get_history() -> List[Dict[str, Any]]:
                     "total_pe_oi": data.get("Total PE OI") or 0,
                     "ce_oi_change": data.get("CE OI Change") or 0,
                     "pe_oi_change": data.get("PE OI Change") or 0,
-                    "selected_expiry": data.get("selectedExpiry"),
-                    "raw": data.get("raw"),
+                    "selected_expiry": data.get("selectedExpiry")
+                    # "raw": data.get("raw"),
                 }
             })
 
