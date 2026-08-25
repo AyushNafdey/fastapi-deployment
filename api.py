@@ -3,6 +3,7 @@ import certifi
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from config import *
 
@@ -21,11 +22,15 @@ from google.genai import types
 
 try:
     from .scheduler_config import get_schedule_minutes
-except ImportError:  # pragma: no cover - fallback for direct script execution
+except ImportError:  
     from scheduler_config import get_schedule_minutes
 
 # Configuration
-NSE_SOURCE_URL = os.getenv("NSE_SOURCE_URL", "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY")
+NSE_SOURCE_URL = os.getenv("NSE_SOURCE_URL", "https://www.nseindia.com/api/option-chain-v3?type=Indices&symbol=NIFTY")
+NSE_CONTRACT_INFO_URL = os.getenv(
+    "NSE_CONTRACT_INFO_URL",
+    "https://www.nseindia.com/api/option-chain-contract-info?symbol=NIFTY",
+)
 FETCH_USER_AGENT = os.getenv(
     "FETCH_USER_AGENT",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -158,11 +163,40 @@ def fetch_option_chain_from_source() -> Dict[str, Any]:
         "Referer": "https://www.nseindia.com",
     }
     try:
-        resp = requests.get(NSE_SOURCE_URL, headers=headers, timeout=FETCH_TIMEOUT)
+        contract_info_resp = requests.get(
+            NSE_CONTRACT_INFO_URL, headers=headers, timeout=FETCH_TIMEOUT
+        )
+        contract_info_resp.raise_for_status()
+        contract_info = contract_info_resp.json()
+
+        expiry_dates = contract_info.get("expiryDates", [])
+        if not expiry_dates and isinstance(contract_info.get("records"), dict):
+            expiry_dates = contract_info["records"].get("expiryDates", [])
+        expiry = expiry_dates[0] if isinstance(expiry_dates, list) and expiry_dates else None
+
+        if not expiry:
+            logger.warning("No expiry found in %s", NSE_CONTRACT_INFO_URL)
+            return {}
+
+        url_parts = urlsplit(NSE_SOURCE_URL)
+        query = [
+            (key, value)
+            for key, value in parse_qsl(url_parts.query, keep_blank_values=True)
+            if key.lower() != "expiry"
+        ]
+        query.append(("expiry", expiry))
+        expiry_url = urlunsplit(
+            (
+                url_parts.scheme,
+                url_parts.netloc,
+                url_parts.path,
+                urlencode(query),
+                url_parts.fragment,
+            )
+        )
+        resp = requests.get(expiry_url, headers=headers, timeout=FETCH_TIMEOUT)
         resp.raise_for_status()
-        # Some endpoints return JSON; some return text with JSON inside
-        data = resp.json()
-        return data
+        return resp.json()
     except Exception as exc:
         logger.warning("Primary fetch failed (%s). Returning empty payload. Exception: %s", NSE_SOURCE_URL, exc)
         # Return empty dict instead of raising so scheduler continues
@@ -213,7 +247,9 @@ def fetch_and_store_job() -> None:
             hour=15, minute=32, second=0, microsecond=0
         )
 
-        if now < market_open or now >= market_close:
+        TEST_MODE = True
+
+        if not TEST_MODE and (now < market_open or now >= market_close):
             logger.info(
                 "Market closed (%s). Skipping collection.",
                 now.strftime("%H:%M:%S")
@@ -370,19 +406,19 @@ def get_latest() -> Optional[Dict[str, Any]]:
         logger.exception("Error in /latest-data: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.get("/collect")
-def collect_data(x_cron_secret: str | None = Header(default=None)):
-    expected_secret = os.getenv("CRON_SECRET")
+# @app.get("/collect")
+# def collect_data(x_cron_secret: str | None = Header(default=None)):
+#     expected_secret = os.getenv("CRON_SECRET")
 
-    if not expected_secret or x_cron_secret != expected_secret:
-        raise HTTPException(
-            status_code=403,
-            detail="Unauthorized"
-        )
+#     if not expected_secret or x_cron_secret != expected_secret:
+#         raise HTTPException(
+#             status_code=403,
+#             detail="Unauthorized"
+#         )
 
-    fetch_and_store_job()
+#     fetch_and_store_job()
 
-    return {"status": "collection attempted"}
+#     return {"status": "collection attempted"}
 
 @app.post("/ai-analysis")
 async def generate_ai_analysis(request: PromptRequest):
@@ -409,6 +445,14 @@ async def generate_ai_analysis(request: PromptRequest):
             raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again in a minute.")
         logger.exception("Gemini analysis request failed")
         raise HTTPException(status_code=502, detail="AI analysis service is unavailable")
+
+# @app.get('/nearest-expiry')
+# def get_nearest_expiry():
+#         url = f"{self.__main_url}{self.__contract_info}"
+#         response = self.session.get(url=url, headers=self.headers, timeout=10, cookies=self.cookies)
+#         data = response.json()
+#         nearest_expiry = data['expiryDates']
+#         return nearest_expiry
 
 # Scheduler lifecycle
 scheduler = BackgroundScheduler()
