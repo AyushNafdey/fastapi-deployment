@@ -279,7 +279,7 @@ def fetch_and_store_job() -> None:
 
 # API endpoints
 
-@app.get("/history", response_model=List[Snapshot])
+# @app.get("/history", response_model=List[Snapshot])
 def get_history() -> List[Dict[str, Any]]:
     """
     Return ONLY the previous calendar day's data.
