@@ -1,7 +1,7 @@
 import os
 import certifi
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -275,55 +275,19 @@ def fetch_and_store_job() -> None:
 
 # API endpoints
 
-# @app.get("/history", response_model=List[Snapshot])
+@app.get("/history", response_model=List[Snapshot])
 def get_history() -> List[Dict[str, Any]]:
     """
-    Return ONLY the previous calendar day's data.
-
-    Example:
-    Today = 24-08-2026
-    History = 23-08-2026
-
-    If the previous day has no collection/data, return an empty list.
-    Do not search further backwards.
+    Return all snapshots from the active collection in chronological order.
     """
     try:
-        today = datetime.now(IST).date()
-
-        # EXACTLY previous calendar day
-        previous_day = today - timedelta(days=1)
-
-        previous_collection_name = (
-            f"oc_data_{previous_day.strftime('%d-%m-%Y')}"
-        )
-
-        logger.info(
-            "Looking for history in collection: %s",
-            previous_collection_name
-        )
-
-        # Check whether previous day's collection exists
-        if previous_collection_name not in db.list_collection_names():
-            logger.info(
-                "No collection found for previous day: %s",
-                previous_collection_name
-            )
-            return []
-
-        previous_collection = db[previous_collection_name]
-
-        # Get ALL records from previous day
         docs = list(
-            previous_collection
+            collection
             .find({})
             .sort("timestamp", ASCENDING)
         )
 
         if not docs:
-            logger.info(
-                "Previous day's collection is empty: %s",
-                previous_collection_name
-            )
             return []
 
         results = []
@@ -357,11 +321,7 @@ def get_history() -> List[Dict[str, Any]]:
                 }
             })
 
-        logger.info(
-            "Returning %d history records from %s",
-            len(results),
-            previous_collection_name
-        )
+        logger.info("Returning %d history records", len(results))
 
         return results
 
