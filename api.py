@@ -203,10 +203,6 @@ def fetch_option_chain_from_source() -> Dict[str, Any]:
         return {}
 
 def store_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Compute totals and store snapshot into MongoDB collection.
-    Returns the stored document as dict.
-    """
     computed = compute_totals_from_nse_json(payload)
     now_utc = datetime.now(timezone.utc)
     doc = {
